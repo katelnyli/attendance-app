@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Attendance Checker</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                padding: 20px;
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding-bottom: 10px;
+                border-bottom: 2px solid #4CAF50;
+            }
+            .user-info {
+                color: #666;
+            }
+            button {
+                margin-top: 10px;
+                padding: 10px 20px;
+                font-size: 14px;
+                cursor: pointer;
+                border: none;
+                border-radius: 4px;
+            }
+            .btn-primary {
+                background: #4CAF50;
+                color: white;
+            }
+            .btn-primary:hover {
+                background: #45a049;
+            }
+            .btn-secondary {
+                background: #2196F3;
+                color: white;
+            }
+            .btn-secondary:hover {
+                background: #1976D2;
+            }
+            .btn-logout {
+                background: #f44336;
+                color: white;
+            }
+            .btn-logout:hover {
+                background: #da190b;
+            }
+            input[type="text"] {
+                margin-top: 10px;
+                padding: 8px;
+                font-size: 14px;
+                width: 100%;
+                box-sizing: border-box;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: 500;
+                color: #333;
+            }
+            .error {
+                color: #f44336;
+                margin-top: 10px;
+            }
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin-top: 20px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 12px;
+                text-align: left;
+            }
+            th {
+                background: #4CAF50;
+                color: white;
+            }
+            tr:nth-child(even) {
+                background: #f9f9f9;
+            }
+            .loading {
+                display: none;
+                margin-top: 10px;
+                color: #666;
+            }
+            .action-buttons {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>Attendance Checker</h1>
+                <div class="user-info">
+                    Logged in as: <strong id="userEmail"></strong><br>
+                    Role: <strong id="userRole"></strong>
+                </div>
+            </div>
+            <div>
+                <button id="manageUsersBtn" class="btn-secondary" onclick="goToUsers()" style="display: none; margin-right: 10px;">Manage Users</button>
+                <button class="btn-logout" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            <button id="uploadBtn" class="btn-secondary" onclick="goToUpload()" style="display: none;">Upload Attendance File</button>
+            <button id="viewMyAttendanceBtn" class="btn-primary" onclick="viewMyAttendance()" style="display: none;">View My Attendance</button>
+        </div>
+
+        <div id="adminForm" style="display: none;">
+            <div class="form-group">
+                <label>Names (comma separated):</label>
+                <input
+                    type="text"
+                    id="namesInput"
+                    placeholder="姓名1, 姓名2, 姓名3"
+                />
+            </div>
+
+            <button class="btn-primary" onclick="submitForm()">View Attendance</button>
+            <button
+                id="exportBtn"
+                class="btn-secondary"
+                style="display: none"
+                onclick="exportExcel()"
+            >
+                Export to Excel
+            </button>
+        </div>
+
+        <div id="loading" class="loading">Loading...</div>
+        <div id="error" class="error"></div>
+
+        <table id="resultsTable" style="display: none">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Total Hours</th>
+                    <th>Last Updated</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <script>
+            let token = null;
+            let userPermissions = [];
+            let userFullName = '';
+            let userRole = '';
+            let currentNames = [];
+
+            // Check authentication on page load
+            window.onload = function() {
+                token = localStorage.getItem('token');
+                const email = localStorage.getItem('email');
+
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+
+                if (email) {
+                    document.getElementById('userEmail').textContent = email;
+                }
+
+                const cachedRole = localStorage.getItem('role');
+                if (cachedRole) {
+                    userRole = cachedRole;
+                    document.getElementById('userRole').textContent = userRole;
+                    if (userRole === 'admin') {
+                        document.getElementById('manageUsersBtn').style.display = 'inline-block';
+                    }
+                }
+
+                verifyToken();
+            };
+
+            function goToUsers() {
+                window.location.href = '/users.html';
+            }
+
+            function goToUpload() {
+                window.location.href = '/upload.html';
+            }
+
+            async function verifyToken() {
+                try {
+                    const res = await fetch(
+                        'http://127.0.0.1:8000/api/v1/auth/me',
+                        {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                            },
+                        },
+                    );
+
+                    if (!res.ok) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('email');
+                        window.location.href = '/login.html';
+                        return;
+                    }
+
+                    const data = await res.json();
+                    document.getElementById('userEmail').textContent = data.email;
+                    localStorage.setItem('email', data.email);
+
+                    userPermissions = data.permissions || [];
+                    userFullName = data.full_name || '';
+                    userRole = data.role || '';
+
+                    if (userRole) {
+                        localStorage.setItem('role', userRole);
+                        document.getElementById('userRole').textContent = userRole;
+                    }
+
+                    if (userRole === 'admin') {
+                        document.getElementById('manageUsersBtn').style.display = 'inline-block';
+                    }
+
+                    // Show appropriate UI based on permissions
+                    const hasReadAll = userPermissions.includes('read:attendance');
+                    const hasWriteAttendance = userPermissions.includes('write:attendance');
+                    const hasReadSelf = userPermissions.includes('read:attendance:self');
+
+                    if (hasReadAll) {
+                        // Admin/HR - show full form
+                        document.getElementById('adminForm').style.display = 'block';
+                        if (hasWriteAttendance) {
+                            document.getElementById('uploadBtn').style.display = 'inline-block';
+                        }
+                    } else if (hasReadSelf) {
+                        // Regular user - show "View My Attendance" button
+                        document.getElementById('viewMyAttendanceBtn').style.display = 'inline-block';
+                    } else {
+                        // No permissions
+                        const errorDiv = document.getElementById('error');
+                        errorDiv.textContent = 'You do not have permission to view attendance. Please contact your administrator.';
+                        errorDiv.style.background = '#fff3cd';
+                        errorDiv.style.padding = '15px';
+                        errorDiv.style.borderRadius = '4px';
+                        errorDiv.style.border = '1px solid #ffc107';
+                    }
+                } catch (err) {
+                    console.error('Token verification failed:', err);
+                }
+            }
+
+            function logout() {
+                localStorage.removeItem('token');
+                localStorage.removeItem('email');
+                localStorage.removeItem('role');
+                window.location.href = '/login.html';
+            }
+
+            async function viewMyAttendance() {
+                const errorDiv = document.getElementById('error');
+                const loadingDiv = document.getElementById('loading');
+                const table = document.getElementById('resultsTable');
+                const tbody = table.querySelector('tbody');
+
+                errorDiv.textContent = '';
+                table.style.display = 'none';
+                tbody.innerHTML = '';
+                loadingDiv.style.display = 'block';
+
+                try {
+                    const res = await fetch(
+                        'http://127.0.0.1:8000/api/v1/attendance/me',
+                        {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                            },
+                        },
+                    );
+
+                    loadingDiv.style.display = 'none';
+
+                    if (res.status === 401) {
+                        alert('Session expired. Please login again.');
+                        logout();
+                        return;
+                    }
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        errorDiv.textContent = data.detail || 'Server error';
+                        return;
+                    }
+
+                    if (data.data && data.data.length > 0) {
+                        table.style.display = '';
+                        data.data.forEach((row) => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td>${row.name}</td>
+                                <td>${row.total_hours.toFixed(2)}</td>
+                                <td>${row.date ? new Date(row.date).toLocaleDateString('zh-CN') : 'N/A'}</td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+                    } else {
+                        errorDiv.textContent = 'No attendance records found for you.';
+                    }
+                } catch (err) {
+                    loadingDiv.style.display = 'none';
+                    errorDiv.textContent = 'Failed to connect to backend.';
+                    console.error(err);
+                }
+            }
+
+            async function submitForm() {
+                const namesInput = document.getElementById('namesInput');
+                const errorDiv = document.getElementById('error');
+                const loadingDiv = document.getElementById('loading');
+                const table = document.getElementById('resultsTable');
+                const tbody = table.querySelector('tbody');
+
+                errorDiv.textContent = '';
+                table.style.display = 'none';
+                tbody.innerHTML = '';
+                document.getElementById('exportBtn').style.display = 'none';
+
+                const names = namesInput.value
+                    .split(/[,，、]/)
+                    .map((n) => n.trim())
+                    .filter((n) => n.length > 0);
+
+                if (names.length === 0) {
+                    errorDiv.textContent = 'Please enter at least one name.';
+                    return;
+                }
+
+                currentNames = names;
+
+                const formData = new FormData();
+                names.forEach((name) => formData.append('names', name));
+
+                loadingDiv.style.display = 'block';
+
+                try {
+                    const res = await fetch(
+                        'http://127.0.0.1:8000/api/v1/attendance/',
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                            },
+                            body: formData,
+                        },
+                    );
+
+                    loadingDiv.style.display = 'none';
+
+                    if (res.status === 401) {
+                        alert('Session expired. Please login again.');
+                        logout();
+                        return;
+                    }
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        errorDiv.textContent = data.detail || 'Server error';
+                        return;
+                    }
+
+                    if (data.data && data.data.length > 0) {
+                        table.style.display = '';
+                        data.data.forEach((row) => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td>${row.name}</td>
+                                <td>${row.total_hours.toFixed(2)}</td>
+                                <td>${row.date ? new Date(row.date).toLocaleDateString('zh-CN') : 'N/A'}</td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+
+                        // Show export button if user has export permission
+                        if (userPermissions.includes('export:attendance')) {
+                            document.getElementById('exportBtn').style.display = 'inline-block';
+                        }
+                    } else {
+                        errorDiv.textContent = 'No records found for the specified names.';
+                    }
+                } catch (err) {
+                    loadingDiv.style.display = 'none';
+                    errorDiv.textContent = 'Failed to connect to backend.';
+                    console.error(err);
+                }
+            }
+
+            async function exportExcel() {
+                if (currentNames.length === 0) {
+                    alert('Please search for names first');
+                    return;
+                }
+
+                const formData = new FormData();
+                currentNames.forEach((name) => formData.append('names', name));
+
+                try {
+                    const res = await fetch(
+                        'http://127.0.0.1:8000/api/v1/attendance/export',
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                            },
+                            body: formData,
+                        },
+                    );
+
+                    if (res.status === 401) {
+                        alert('Session expired. Please login again.');
+                        logout();
+                        return;
+                    }
+
+                    if (!res.ok) {
+                        alert('Export failed');
+                        return;
+                    }
+
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'attendance_export.xlsx';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                } catch (err) {
+                    alert('Export failed');
+                    console.error(err);
+                }
+            }
+        </script>
+    </body>
+</html>

@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-multipart
+pandas
+openpyxl
+sqlalchemy
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]
+python-dotenv
+alembic
+asyncpg
+pydantic-settings
+greenlet
+argon2_cffi
+redis[hiredis]
