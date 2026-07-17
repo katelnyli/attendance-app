@@ -43,11 +43,12 @@ docker exec -it postgres-rbac psql -U postgres -d rbac_db
 ## Architecture
 
 ### Authentication Flow
-1. JWT tokens are created with `{sub: user_id, role: role_name}` payload
-2. `get_current_user` dependency extracts token, loads user from DB, and attaches `user.role` from token
-3. Role is checked directly via `current_user.role` (not from DB or cache) for optimal performance
+1. JWT tokens are created with `{sub: user_id, perms: [permissions]}` payload (no role in token)
+2. `get_current_user` dependency extracts token, loads user from DB, and attaches `user.permissions` from token
+3. Permissions are checked directly via `current_user.permissions` (not from DB or cache) for optimal performance
 4. User details are cached in Redis with key pattern `user:{user_id}:details` (TTL: 600s)
 5. Cache is invalidated when user role is updated
+6. Role is only used for display purposes and permission grouping in DB
 
 ### Database Schema
 
